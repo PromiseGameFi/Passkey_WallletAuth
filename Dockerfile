@@ -13,6 +13,7 @@ RUN STACK=heroku-20 /tmp/buildpack/heroku/go/bin/compile /app /tmp/build_cache /
 # Prepare final, minimal image
 FROM heroku/heroku:20
 
+
 COPY --from=build /app /app
 ENV HOME /app
 WORKDIR /app
