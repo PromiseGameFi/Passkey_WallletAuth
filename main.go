@@ -11,20 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-contrib/sessions"
-	gormsessions "github.com/gin-contrib/sessions/gorm"
-	"github.com/gin-gonic/gin"
-	_ "github.com/heroku/x/hmetrics/onload"
-	"github.com/joho/godotenv"
-	"github.com/pkg/errors"
-	"github.com/tidwall/gjson"
-	"github.com/tkhq/demo-passkey-wallet/internal/alchemy"
-	"github.com/tkhq/demo-passkey-wallet/internal/db"
-	"github.com/tkhq/demo-passkey-wallet/internal/ethereum"
-	"github.com/tkhq/demo-passkey-wallet/internal/models"
-	"github.com/tkhq/demo-passkey-wallet/internal/turnkey"
-	"github.com/tkhq/demo-passkey-wallet/internal/types"
+
 )
 
 const SESSION_NAME = "demo_session"
