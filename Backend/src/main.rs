@@ -2,18 +2,22 @@ use actix_web::{web, App, HttpServer, HttpResponse, Error};
 use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use ethereum_types::U256;
 use web3::transports::Http;
+use dotenv::dotenv;
+use log::{info, error};
+
+mod wallet;
+use wallet::HDWallet;
 
 // API State
 pub struct AppState {
-    wallet: Mutex<HDWallet<Http>>,
+    wallet: Mutex<Option<HDWallet<Http>>>,
 }
 
 // Request/Response structures
 #[derive(Deserialize)]
 struct CreateWalletRequest {
-    passkey: String,
+    credential_id: String,
 }
 
 #[derive(Deserialize)]
@@ -26,35 +30,28 @@ struct SendTransactionRequest {
 }
 
 #[derive(Serialize)]
-struct TokenListResponse {
-    tokens: Vec<TokenInfo>,
+struct TransactionResponse {
+    hash: String,
 }
 
-#[derive(Serialize)]
-struct TokenInfo {
-    symbol: String,
-    address: String,
-    decimals: u8,
-}
-
-#[derive(Serialize)]
-struct WalletResponse {
-    accounts: Vec<WalletAccount>,
-    supported_tokens: Vec<TokenInfo>,
-}
-
-// API Routes implementation
 async fn create_wallet(
     data: web::Data<AppState>,
     req: web::Json<CreateWalletRequest>,
 ) -> Result<HttpResponse, Error> {
-    let transport = Http::new("https://sepolia.infura.io/v3/YOUR-PROJECT-ID")?;
+    let credential_bytes = base64::decode(&req.credential_id)
+        .map_err(actix_web::error::ErrorBadRequest)?;
+
+    let transport = Http::new(&std::env::var("INFURA_URL")
+        .unwrap_or_else(|_| "https://sepolia.infura.io/v3/YOUR-PROJECT-ID".to_string()))?;
     let web3 = web3::Web3::new(transport);
     
-    let wallet = HDWallet::new(req.passkey.as_bytes(), web3).await
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+    let wallet = HDWallet::new(&credential_bytes, web3).await
+        .map_err(|e| {
+            error!("Failed to create wallet: {}", e);
+            actix_web::error::ErrorInternalServerError(e)
+        })?;
     
-    *data.wallet.lock().unwrap() = wallet;
+    *data.wallet.lock().unwrap() = Some(wallet);
     
     Ok(HttpResponse::Ok().json("Wallet created successfully"))
 }
@@ -62,9 +59,15 @@ async fn create_wallet(
 async fn derive_account(
     data: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    let mut wallet = data.wallet.lock().unwrap();
+    let mut wallet_lock = data.wallet.lock().unwrap();
+    let wallet = wallet_lock.as_mut()
+        .ok_or_else(|| actix_web::error::ErrorUnauthorized("Wallet not initialized"))?;
+
     let account = wallet.derive_account().await
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        .map_err(|e| {
+            error!("Failed to derive account: {}", e);
+            actix_web::error::ErrorInternalServerError(e)
+        })?;
     
     Ok(HttpResponse::Ok().json(account))
 }
@@ -73,84 +76,54 @@ async fn send_transaction(
     data: web::Data<AppState>,
     req: web::Json<SendTransactionRequest>,
 ) -> Result<HttpResponse, Error> {
-    let wallet = data.wallet.lock().unwrap();
+    let mut wallet_lock = data.wallet.lock().unwrap();
+    let wallet = wallet_lock.as_mut()
+        .ok_or_else(|| actix_web::error::ErrorUnauthorized("Wallet not initialized"))?;
     
-    let amount = U256::from_dec_str(&req.amount)
-        .map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+    let amount = ethereum_types::U256::from_dec_str(&req.amount)
+        .map_err(actix_web::error::ErrorBadRequest)?;
     
     let gas_price = req.gas_price.as_ref()
-        .map(|p| U256::from_dec_str(p))
+        .map(|p| ethereum_types::U256::from_dec_str(p))
         .transpose()
-        .map_err(|e| actix_web::error::ErrorBadRequest(e))?;
+        .map_err(actix_web::error::ErrorBadRequest)?;
 
-    let tx_hash = match &req.token_symbol {
-        Some(token) => {
-            wallet.send_token(
-                req.from_index,
-                token,
-                &req.to,
-                amount,
-                gas_price,
-            ).await
-        },
-        None => {
-            wallet.send_eth(
-                req.from_index,
-                &req.to,
-                amount,
-                gas_price,
-            ).await
-        }
-    }.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+    let tx_hash = wallet.send_transaction(
+        req.from_index,
+        &req.to,
+        amount,
+        req.token_symbol.clone(),
+        gas_price,
+    ).await.map_err(|e| {
+        error!("Transaction failed: {}", e);
+        actix_web::error::ErrorInternalServerError(e)
+    })?;
     
-    Ok(HttpResponse::Ok().json(format!("0x{:x}", tx_hash)))
+    Ok(HttpResponse::Ok().json(TransactionResponse {
+        hash: format!("0x{:x}", tx_hash)
+    }))
 }
 
 async fn get_wallet_info(
     data: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    let wallet = data.wallet.lock().unwrap();
-    
-    let supported_tokens: Vec<TokenInfo> = wallet.list_supported_tokens()
-        .into_iter()
-        .filter_map(|symbol| {
-            wallet.get_token_info(&symbol).ok().map(|(address, decimals)| TokenInfo {
-                symbol,
-                address: address.to_string(),
-                decimals,
-            })
-        })
-        .collect();
-
-    Ok(HttpResponse::Ok().json(WalletResponse {
-        accounts: wallet.accounts.clone(),
-        supported_tokens,
-    }))
-}
-
-async fn update_balances(
-    data: web::Data<AppState>,
-) -> Result<HttpResponse, Error> {
-    let mut wallet = data.wallet.lock().unwrap();
-    
-    for i in 0..wallet.get_account_count() {
-        wallet.update_account_balances(i).await
-            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-    }
+    let wallet_lock = data.wallet.lock().unwrap();
+    let wallet = wallet_lock.as_ref()
+        .ok_or_else(|| actix_web::error::ErrorUnauthorized("Wallet not initialized"))?;
     
     Ok(HttpResponse::Ok().json(wallet.accounts.clone()))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    dotenv::dotenv().ok();
+    dotenv().ok();
     env_logger::init();
 
     let app_state = web::Data::new(AppState {
-        wallet: Mutex::new(HDWallet::new(&[0; 32], web3::Web3::new(
-            Http::new("https://sepolia.infura.io/v3/YOUR-PROJECT-ID")?
-        )).await.unwrap()),
+        wallet: Mutex::new(None),
     });
+
+    info!("Starting server at http://127.0.0.1:8080");
 
     HttpServer::new(move || {
         let cors = Cors::default()
@@ -166,7 +139,6 @@ async fn main() -> std::io::Result<()> {
             .route("/wallet/derive", web::post().to(derive_account))
             .route("/wallet/send", web::post().to(send_transaction))
             .route("/wallet/info", web::get().to(get_wallet_info))
-            .route("/wallet/balances", web::get().to(update_balances))
     })
     .bind("127.0.0.1:8080")?
     .run()
