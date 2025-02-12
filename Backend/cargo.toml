@@ -2,69 +2,22 @@
 name = "hd-wallet"
 version = "0.1.0"
 edition = "2021"
-authors = ["Promie Emmanuel"]
-description = "HD Wallet with Passkey Authentication"
 
 [dependencies]
-# Cryptography and Wallet
-bip39 = "1.0.1"
-bitcoin = "0.30.1"
-secp256k1 = { version = "0.27.0", features = ["rand"] }
-ethereum = "0.14.0"
-ethereum-types = "0.14.1"
-web3 = "0.19.0"
-sha2 = "0.10.7"
-hex = "0.4.3"
-
-# Web framework and server
-actix-web = "4.4.0"
-actix-cors = "0.6.4"
-actix-rt = "2.9.0"
-
-# Serialization
+actix-web = "4.0"
+actix-cors = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# Async runtime
-tokio = { version = "1.32.0", features = ["full"] }
-
-# Error handling
-thiserror = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+web3 = "0.18"
+ethereum-types = "0.14"
+bip39 = "1.0"
+bitcoin = "0.29"
+secp256k1 = "0.24"
+sha2 = "0.10"
 anyhow = "1.0"
-
-# Logging
-env_logger = "0.10.0"
-log = "0.4"
-
-# Configuration
-dotenv = "0.15.0"
-config = "0.13.3"
-
-# Utils
-async-trait = "0.1.73"
+dotenv = "0.15"
+env_logger = "0.9"
+base64 = "0.13"
 futures = "0.3"
-
-[dev-dependencies]
-# Testing
-mockall = "0.11.4"
-tokio-test = "0.4.2"
-pretty_assertions = "1.4.0"
-
-[features]
-default = ["web3/http", "web3/signing"]
-
-[[bin]]
-name = "hd-wallet"
-path = "src/main.rs"
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = 'abort'
-strip = true
-
-[workspace]
-members = [
-    ".",
-]
+log = "0.4"
