@@ -1,3 +1,5 @@
+Codebase is Under Update
+
 # HD Wallet with Passkey Authentication
 
 A hierarchical deterministic (HD) wallet implementation with passkey authentication, supporting Ethereum and ERC20 tokens on the Sepolia network.
